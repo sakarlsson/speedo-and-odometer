@@ -13,4 +13,4 @@ It will store the current km reading in the eeprom (using a rotating schem to ge
 The speedo is using the SwitechX25 lib, but I had to fix a bug in the lib. When it initialize and move to zero its not using its accelleration code, so it will miss step. Can't find the fix..
 
 
-
+![Speedo-odo and Tacho](speedo-odo.jpg)
