@@ -236,6 +236,7 @@ void speedo(int speedin)
   static int currentPos = 0;
   unsigned long speed = speedin;
 
+  /* This code is for my quirk in the printed dial.... */
   if (speed <= 1000) {
       nextPos = (int) (speed * STEPS_PER_BIG_KPH_MARK / 200);
   } else if (speed <= 1200) {
