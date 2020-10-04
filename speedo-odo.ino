@@ -320,11 +320,11 @@ void retrieve_setting_from_eeprom() {
     if ( maxspeed == 0 ) {
 	maxspeed = 200;
     }
-    Serial.print("restore from eeprom  zm: ");
+    Serial.print("Restoring from eeprom  zeromark: ");
     Serial.print(zeromark);
-    Serial.print(" mm: ");
+    Serial.print(" maxmark: ");
     Serial.print(maxmark);
-    Serial.print(" ms: ");
+    Serial.print(" maxspeed: ");
     Serial.println(maxspeed);
     
 }
