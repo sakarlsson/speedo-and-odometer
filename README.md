@@ -3,7 +3,7 @@ Arduino based speedometer and odometer
 
 Made to work for my El Camino 1970 with a Holley Terminator X EFI.
 
-The code is not generally useful, by may be useful as inspiration.
+The code is not generally useful, checkout master branch instead. 
 
 A quirk is that my printed dial had an error in speed per division between 100 kph and 120 kph, which I have compensated for in the code. 
 
