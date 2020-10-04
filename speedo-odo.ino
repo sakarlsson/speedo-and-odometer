@@ -9,6 +9,11 @@
 // standard X25.168 range 315 degrees at 1/3 degree steps
 #define STEPS (315*3)
 // For motors connected đto digital pins 4,5,6,7
+// The X27 168 has built in stops at 0 and max
+// Pin out: Poke the needle pin at your nose and orient the text X27 168 so you can read it.
+//          Then pin 1 is to the top left (protruding out on the the other side)
+//          pin 2 follows counter clock wise, then 3 and 4 which is to the top right.
+// Connect 1 -> out 4, 2 -> out 5, 3 -> out 6 and 4 -> out 7
 SwitecX25 motor1(STEPS,4,5,6,7);
 
 
@@ -18,13 +23,29 @@ SwitecX25 motor1(STEPS,4,5,6,7);
 #define OLED_RESET     3 // Reset pin # (or -1 if sharing Arduino reset pin)
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// Vortec box has 4k pulses/mile -> 2485 pulses / km ->
+// 1 km/h = 0.69 Hz = 1448 mS, 100 km/h = 69 Hz = 14.4 mS,  200 km/h = 138 Hz = 7.24 mS 
+//
+// The signal is 0 - +12V square wave signal. It needs a serial resistor at 10Kohm to
+// connect it to the Arduino input pin. The input pin has a built in clamping
+// zener at 5V, and a 10Kohm in series will make for the allowed 1 mA clamping current.
+
+#define PULSES_PER_KM 2485
+int speed_input_pin = 2;
+
+// Pull this pin to GND to reset the odo. 
+int odo_reset_pin = 8;
+
+bool toggle = false;
+unsigned long savedDistanceAtStart;
 volatile unsigned long distanceCount = 0, period[4], lastMicros = 0, currentMicros;
 
-unsigned long savedDistanceAtStart;
+// Settings - can be set via serial commands
+int zeromark;  // steps from 0 to where the physical zero mark really is
+int maxmark;   // steps to the maxmark
+int maxspeed;  // what is the speed at the maxmark
 
-int speed_input_pin = 2;
-int odo_reset_pin = 8;
-bool toggle = false;
+void retrieve_setting_from_eeprom();
 
 void IRQcounter() {
   bool in = digitalRead(2);
@@ -42,8 +63,6 @@ void IRQcounter() {
   lastMicros = currentMicros;
 }
 
-
-#define PULSES_PER_KM 2485
 
 void setup() {
     Serial.begin(9600);
@@ -63,7 +82,8 @@ void setup() {
     init_rotation_possitions();
     savedDistanceAtStart = get_saved_distance();
     speedo_init();
-    speedo(0);
+    retrieve_setting_from_eeprom();
+    speedo(0, false);
 }
 
 unsigned long longest(unsigned long *periodp) {
@@ -77,42 +97,122 @@ unsigned long longest(unsigned long *periodp) {
     return max;
 }
 
+// tokenize(s) split s into global array cmd 
+// return number of tokens
+#define MAX_ARGSZ 15
+#define MAX_ARGS 4
+char cmd[MAX_ARGS][MAX_ARGSZ+1];
+int tokenize(char *s) {
+    int i = 0;
+    char *p;
+    if(strlen(s) == 0) {
+	return 0;
+    }
+    strncpy(cmd[i], strtok(s, " \t"), MAX_ARGSZ);
+    cmd[i][MAX_ARGSZ] = '\0';
+    i++;
+    while ((p = strtok(NULL, " \t")) != NULL && i < MAX_ARGS) {
+	strncpy(cmd[i], p, MAX_ARGSZ);
+	cmd[i][MAX_ARGSZ] = '\0';
+	i++;
+    }
+    return i;
+}
+// get_command() reads from serial until a line is complete
+// do not block
+// returns tokenize(line) or 0 if not yet a full line 
+int get_command(){
+    static char line[MAX_ARGS * (MAX_ARGSZ + 1) + 1];
+    static int lineix = 0;
+    if (Serial.available())  {
+	char c = Serial.read(); 
+	if (c == '\r') {  
+	    Serial.read(); //gets rid of the following \r
+	    line[lineix] = '\0';
+	    lineix = 0;
+	    return tokenize(line);
+	} else {     
+	    line[lineix] = c; 
+	    lineix++;
+	}
+    }
+    return 0;
+}
+
+#define RUN_MODE 0
+#define MOVETO_MODE 1
+#define SPEEDTEST_MODE 2
+
 void loop() {
-    byte value;
+    static int mode = RUN_MODE;
+    static int modevalue = 0;
     int speed = 0, lastSpeed = 0;
     unsigned long t, startTime = 0, lastDistanceCount;
-    
 
     unsigned long distance;
     startTime = millis();
     
     while (1) {
-	byte *bp;
-	t = millis();
-	distance = savedDistanceAtStart + (distanceCount)/PULSES_PER_KM; /* in cm */
-	if(lastDistanceCount != distanceCount) {
-	    lastDistanceCount = distanceCount;
-	    startTime = t;
+	int i = get_command();
+	if (i > 0) {
+	    if (strcmp(cmd[0], "moveto") == 0) {
+		mode = MOVETO_MODE;
+		modevalue = atoi(cmd[1]);
+		Serial.println("MOVETO_MODE");
+	    } else if (strcmp(cmd[0], "speed") == 0) {
+		mode = SPEEDTEST_MODE;
+		modevalue = atoi(cmd[1]);
+		speedo(modevalue, true);
+		Serial.println("SPEEDTEST_MODE");
+	    } else if (strcmp(cmd[0], "set") == 0) {
+		if (strcmp(cmd[1], "zeromark") == 0) {
+		    zeromark = atoi(cmd[2]); 
+		    save_zeromark_to_eeprom();
+		} else if (strcmp(cmd[1], "maxmark") == 0) {
+		    maxmark = atoi(cmd[2]); 
+		    save_maxmark_to_eeprom();
+		} else if (strcmp(cmd[1], "maxspeed") == 0) {
+		    maxspeed = atoi(cmd[2]); 
+		    save_maxspeed_to_eeprom();
+		}
+		Serial.println("OK");
+	    } else if (strcmp(cmd[0], "run") == 0) {
+		mode = RUN_MODE;
+		Serial.println("RUN_MODE");
+	    }
 	}
-	/* In case we have no pulses within a sec, we assume speed = 0 */
-	if (t - startTime > 1000) {
-	    speed = 0;
-	} else {
-	    speed = (36000000000/PULSES_PER_KM)/period[0];
-	}
-	/* Serial.print("period: "); */
-	/* Serial.println(period[0]); */
+	if ( mode == RUN_MODE ) {
+	    t = millis();
+	    distance = savedDistanceAtStart + (distanceCount)/PULSES_PER_KM; /* in cm */
+	    if(lastDistanceCount != distanceCount) {
+		lastDistanceCount = distanceCount;
+		startTime = t;
+	    }
+	    /* In case we have no pulses within a sec, we assume speed = 0 */
+	    if (t - startTime > 1000) {
+		speed = 0;
+	    } else {
+		speed = (3600000000/PULSES_PER_KM)/period[0]; // period in uS -> speed in km/h
+	    }
+	    /* Serial.print("period: "); */
+	    /* Serial.println(period[0]); */
 	
-	odo(distance);
-	speedo(speed);
-	motor1.update();
-	save_distance(distance);
-	if (odoResetButton()) {
-	    Serial.println("RESET");
-	    reset_distance();
+	    odo(distance);
+	    speedo(speed, false);
+	    motor1.update();
+	    save_distance(distance);
+	    if (odoResetButton()) {
+		Serial.println("RESET");
+		reset_distance();
+	    }
+	} else if ( mode == MOVETO_MODE ) {
+	    moveto(modevalue);
+	} else if ( mode == SPEEDTEST_MODE ) {
+	    speedo(modevalue, false);
 	}
     }
 }
+
 
 bool odoResetButton() {
     static int prevState = HIGH;
@@ -210,6 +310,37 @@ void save_distance(unsigned long distance) {
     save_long(savepos, distance);
 }
 
+void retrieve_setting_from_eeprom() {
+    zeromark = (int)(get_saved_long(ROTATE_POSITIONS));
+    maxmark = (int)(get_saved_long(ROTATE_POSITIONS+1));
+    if ( maxmark == 0 ) {
+	maxmark = 720;
+    }
+    maxspeed = (int)(get_saved_long(ROTATE_POSITIONS+2));
+    if ( maxspeed == 0 ) {
+	maxspeed = 200;
+    }
+    Serial.print("restore from eeprom  zm: ");
+    Serial.print(zeromark);
+    Serial.print(" mm: ");
+    Serial.print(maxmark);
+    Serial.print(" ms: ");
+    Serial.println(maxspeed);
+    
+}
+
+void save_zeromark_to_eeprom() {
+    save_long(ROTATE_POSITIONS, (unsigned long)zeromark);
+}
+
+void save_maxmark_to_eeprom() {
+    save_long(ROTATE_POSITIONS+1, (unsigned long)maxmark);
+}
+
+void save_maxspeed_to_eeprom() {
+    save_long(ROTATE_POSITIONS+2, (unsigned long)maxspeed);
+}
+
 void odo(long i) {
     char str[10];
     sprintf(str, "%6d", i);
@@ -230,26 +361,38 @@ void speedo_init() {
 }
 
 #define STEPS_PER_BIG_KPH_MARK 63
-void speedo(int speedin)
+// speedin in km/h 
+void speedo(int speedin, bool debug)
 {
   static int nextPos = 0;
   static int currentPos = 0;
   unsigned long speed = speedin;
 
-  /* This code is for my quirk in the printed dial.... */
-  if (speed <= 1000) {
-      nextPos = (int) (speed * STEPS_PER_BIG_KPH_MARK / 200);
-  } else if (speed <= 1200) {
-      nextPos = (int) (5 * STEPS_PER_BIG_KPH_MARK + (speed - 1000) * STEPS_PER_BIG_KPH_MARK / 100);
-  } else {
-      nextPos = (int) (7 * STEPS_PER_BIG_KPH_MARK + (speed - 1200) * STEPS_PER_BIG_KPH_MARK / 200);
+  nextPos = ((((speed << 10) / maxspeed) * (maxmark - zeromark)) >> 10) + zeromark;
+  if (debug) {
+      Serial.print(" x: ");
+      Serial.print((speed << 10) / maxspeed);
+      Serial.print(" zm: ");
+      Serial.print(zeromark);
+      Serial.print(" mm: ");
+      Serial.print(maxmark);
+      Serial.print(" ms: ");
+      Serial.print(maxspeed);
+      Serial.print(" sp: ");
+      Serial.println(speedin);
+      Serial.print("nextPos: ");
+      Serial.println(nextPos);
   }
-  nextPos += ZEROPOS;
-
   if( abs(nextPos - currentPos) > 2) {
     currentPos = nextPos;
     motor1.setPosition(nextPos);
     motor1.updateBlocking();
   }
+}
+
+void moveto(int pos)
+{
+    motor1.setPosition(pos);
+    motor1.updateBlocking();
 }
 
