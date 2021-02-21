@@ -176,6 +176,8 @@ void loop() {
 		    save_maxspeed_to_eeprom();
 		}
 		Serial.println("OK");
+	    } else if (strcmp(cmd[0], "status") == 0) {
+		retrieve_setting_from_eeprom();
 	    } else if (strcmp(cmd[0], "run") == 0) {
 		mode = RUN_MODE;
 		Serial.println("RUN_MODE");

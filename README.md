@@ -45,7 +45,7 @@ To help you figure out the positions you can use
     moveto position
 
 It will move the dial to the poistion - the position is in terms steps of the Switec motor.
-When you have found the position of zero, give `set zero value`, and the
+When you have found the position of zero, give `set zero <value>`, and the
 position will be saved to the internal eeprom.  Proceed with finding the position for
 the max speed mark. 
 
