@@ -68,3 +68,7 @@ The tachometer code will enter Low Power mode when there are no pulses detected,
 did draw about 2-3 mA (after I desoldered the power LED on the Nano).
 
 The Holley Terminator X was programmed to output the Speed on one of the free output pins.
+
+# draw-gauge.py 
+
+Is a small script that works with the Inkscape Simple Scripting extension 
