@@ -4,7 +4,7 @@
 #include <Arduino.h>
 
 #define SLOW 400        // uS per step
-#define FAST 100        // uS per step
+#define FAST 200        // uS per step
 #define ACCELRAMP 100   // steps for changing between SLOW and FAST
 
 class X27Stepper {
