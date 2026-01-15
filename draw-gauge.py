@@ -1,7 +1,7 @@
 # inkscape
 
 def frange(start, stop, step):
-    while start < stop:
+    while start <= stop:
         yield start
         start += step
 	
@@ -16,7 +16,7 @@ def adjust_textpos(text, font_size):
 ####################################################################
 
 # Define some drawing parameters.
-r1 = 40
+r1 = 39
 r2 = r1*0.93
 r_small = r1*0.88
 r_medium = r1*0.82
@@ -25,13 +25,13 @@ r_txt = r1*0.62
 cx, cy = canvas.width/2, canvas.height/2
 
 # Draw the background.
-circle((cx, cy), r1, fill='black')
+#circle((cx, cy), r1, fill='black')
 ang1, ang2 = pi*0.75, pi*2.25
 
 start_value=0
 end_value=160
-small_dash_increment=1
-medium_dash_increment=5
+small_dash_increment=10
+medium_dash_increment=10
 large_dash_increment=20
 
 valued_increment=20              # for x dash make it valued
@@ -45,19 +45,28 @@ tick_deg = sweep_deg / ticks
 font_size=10                  # px
 
 value = start_value
+
+line_layer = layer('lines')
+
+a = arc((cx, cy), r2, (pi/2,pi-0.5), stroke_width=3.5, stroke='red', fill="none")
+line_layer.append(a)
+
 for ang_deg in frange(sweep_start, sweep_end, tick_deg):
     ang = 2*pi*(ang_deg/360)
-    value += small_dash_increment
 
     # Compute the outer and inner coordinates of each tick.
     rr = r_small
     thick = 0.3
     if value % medium_dash_increment == 0:
-        thick = 0.5
+        thick = 0.6
         rr = r_medium
     if value % large_dash_increment == 0:
-        thick = 1.0
+        thick = 1.5
         rr = r_large
+    if value == 0:
+        thick = 0.5
+        rr = r_medium
+        
 
     # tick_ang = (ang2 - ang1)*tick_ang/240 + ang1
     x1 = r2*cos(ang) + cx
@@ -66,21 +75,25 @@ for ang_deg in frange(sweep_start, sweep_end, tick_deg):
     y2 = rr*sin(ang) + cy
     x_txt = r_txt*cos(ang) + cx
     y_txt = r_txt*sin(ang) + cy
-    # print(ang, value, x1-cx, y1-cy)
+    print(ang, value, thick)
 
     clr = '#eef4d7'
     # if ang >= pi*1.74:
     #     clr = 'red'
 
-    if value % valued_increment == 0:
-        (x_adj, y_adj) = adjust_textpos(str(value), font_size)
-        text(f"{value}", (x_txt + x_adj, y_txt + y_adj), fill='#eef4d7', 
-             font_size=f"{font_size}px", 
-             font_family='Comfortaa', 
-             font_weight='bold')
+    # if value % valued_increment == 0:
+    #     (x_adj, y_adj) = adjust_textpos(str(value), font_size)
+    #     text(f"{value}", (x_txt + x_adj, y_txt + y_adj), fill='#eef4d7', 
+    #          font_size=f"{font_size}px", 
+    #          font_family='Comfortaa', 
+    #          font_weight='bold')
 
-    line((x1, y1), (x2, y2),
+    l = line((x1, y1), (x2, y2),
          stroke_width=thick, stroke=clr, stroke_linecap='round')
+    line_layer.append(l)
+
+    value += small_dash_increment
+
 
 # # Draw the surrounding edge.
 # arc((cx, cy), r2, (ang1, ang2),

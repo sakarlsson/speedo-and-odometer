@@ -1,12 +1,11 @@
 // A stepper class for the SwitechX27 168
 // gauge stepper motor.
 
-// This is an arduino lib to step the motor.
-// Time between steps should be min 300 us
+// It assumes the AX1201728 driver (aka X12.017)
 
 #include "x27-stepper.h"
 
-X27Stepper::X27Stepper(int pinStep, int pinDir) {
+X27Stepper::X27Stepper(int pinStep, int pinDir, int resetPin) {
     stepPin = pinStep;
     dirPin = pinDir;
     currentPos = 0;
@@ -16,21 +15,28 @@ X27Stepper::X27Stepper(int pinStep, int pinDir) {
     
     pinMode(stepPin, OUTPUT);
     pinMode(dirPin, OUTPUT);
+    
+    pinMode(resetPin, OUTPUT);
+    digitalWrite(resetPin, LOW);
+    delayMicroseconds(1000);
+    digitalWrite(resetPin, HIGH);
 }
 
 // This method moves to zero for startup calibration
 void X27Stepper::zero() {
-    // Move backwards to find zero position
+    // Move backwards enough steps to guarantee we hit zero
+
+    // X27.168 has 315° range  with 1/3 deg/step
+    // With microstepping and the AX1201728 driver
+    // it will be 3 * 4 steps per deg
+
     digitalWrite(dirPin, LOW);  // Set direction to reverse
-    
-    // Move enough steps to guarantee we hit zero
-    for(int i = 0; i < 315*12; i++) {  // X27.168 has 315° range = ~945 steps
+    for(int i = 0; i < 315*12; i++) {  
         digitalWrite(stepPin, HIGH);
         delayMicroseconds(1);
         digitalWrite(stepPin, LOW);
         delayMicroseconds(SLOW);
     }
-    
     currentPos = 0;
     targetPos = 0;
 }
@@ -45,7 +51,6 @@ void X27Stepper::setPos(int pos) {
 // since called last time and decide if it should
 // actually make a step
 void X27Stepper::update() {
-    // static bool flipflop = false;
     unsigned long now = micros();
     
     // Check if enough time has passed since last step
@@ -84,8 +89,5 @@ void X27Stepper::update() {
     delayMicroseconds(1);  // Short pulse
     digitalWrite(stepPin, LOW);
 
-    // digitalWrite(stepPin, flipflop);
-    // flipflop = ! flipflop;
-    
     lastStepTime = now;
 }

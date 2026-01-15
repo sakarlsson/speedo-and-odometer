@@ -27,9 +27,16 @@ Use the library manger to fetch the used libs. These are needed:
 
     #include <Adafruit_GFX.h>
     #include <Adafruit_SSD1306.h>
-    #include <SwitecX25.h>
 
 Compile and load the Arduino with the code using the normal Arduino IDE.
+
+I use: 
+
+	arduino-cli compile -b arduino:avr:nano
+	arduino-cli upload -p /dev/ttyUSB0  -b arduino:avr:nano:cpu=atmega328old
+	
+	arduino-cli monitor  -p /dev/ttyUSB0
+
 
 ### Run
 
@@ -72,3 +79,22 @@ The Holley Terminator X was programmed to output the Speed on one of the free ou
 # draw-gauge.py 
 
 Is a small script that works with the Inkscape Simple Scripting extension 
+
+
+## Useful links:
+
+
+https://guy.carpenter.id.au/gaugette/2012/01/19/x12-quad-driver-chip/
+
+### To find the X25 driver search for: 
+
+X12.017 AX1201728 AX1201728SG SOP-28
+
+
+
+## X27 motor pins 
+
+The X27 168 has built in stops at 0 and max
+Pin out: Poke the needle pin at your nose and orient the text X27 168 so you can read it.
+         Then pin 1 is to the top left (protruding out on the the other side)
+         pin 2 follows counter clock wise, then 3 and 4 which is to the top right.

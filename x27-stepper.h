@@ -3,8 +3,8 @@
 
 #include <Arduino.h>
 
-#define SLOW 400        // uS per step
-#define FAST 200        // uS per step
+#define SLOW 600        // uS per step; 600 ~= 138 deg/S
+#define FAST 300        // uS per step; 300 ~= 277 deg/S
 #define ACCELRAMP 100   // steps for changing between SLOW and FAST
 
 class X27Stepper {
@@ -17,7 +17,7 @@ private:
     int stepDelay;
     
 public:
-    X27Stepper(int pinStep, int pinDir);
+  X27Stepper(int pinStep, int pinDir, int resetPin);
     void zero();
     void setPos(int pos);
     void update();

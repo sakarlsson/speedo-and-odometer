@@ -4,6 +4,8 @@
 #include <limits.h>
 #include "x27-stepper.h"
 
+#define ODO
+
 #ifdef ODO
 
 #include <Adafruit_GFX.h>
@@ -12,22 +14,10 @@
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 32 // OLED display height, in pixels
 // Declaration for an SSD1306 display connected to I2C (SDA, SCL pins)
-#define OLED_RESET     3 // Reset pin # (or -1 if sharing Arduino reset pin)
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+#define OLED_RESET_PIN     3 // Reset pin # (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET_PIN);
 
 #endif
-
-#define X12_RESET 4
-#define X12_DIR_A 5
-#define X12_STEP_A 6
-
-// For motors connected to digital pins 4,5,6,7
-// The X27 168 has built in stops at 0 and max
-// Pin out: Poke the needle pin at your nose and orient the text X27 168 so you can read it.
-//          Then pin 1 is to the top left (protruding out on the the other side)
-//          pin 2 follows counter clock wise, then 3 and 4 which is to the top right.
-// Connect 1 -> out 4, 2 -> out 5, 3 -> out 6 and 4 -> out 7
-X27Stepper motor1(X12_STEP_A, X12_DIR_A);
 
 // Vortec box has 4k pulses/mile -> 2485 pulses / km ->
 // 1 km/h = 0.69 Hz = 1448 mS, 100 km/h = 69 Hz = 14.4 mS,  200 km/h = 138 Hz = 7.24 mS 
@@ -37,14 +27,23 @@ X27Stepper motor1(X12_STEP_A, X12_DIR_A);
 // zener at 5V, and a 10Kohm in series will make for the allowed 1 mA clamping current.
 
 #define PULSES_PER_KM 2485
-int speed_input_pin = 2;
+#define SPEED_INPUT_PIN 2
 
 // Pull this pin to GND to reset the odo. 
-int odo_reset_pin = 8;
+#define ODO_RESET_PIN 3
 
-bool toggle = false;
+// Motor driver pins
+#define X12_RESET 4
+#define X12_DIR_A 7
+#define X12_STEP_A 8
+X27Stepper motor1(X12_STEP_A, X12_DIR_A, X12_RESET);
+
+
+#define IGN_SENSE_PIN 9 
+#define BAT_CUT_PIN 10 
+
 unsigned long savedDistanceAtStart;
-volatile unsigned long distanceCount = 0, period[4], lastMicros = 0, currentMicros;
+volatile unsigned long distanceCount = 0, period, lastMicros = 0, currentMicros;
 
 // Settings - can be set via serial commands
 int zeromark;  // steps from 0 to where the physical zero mark really is
@@ -53,19 +52,26 @@ int maxspeed;  // what is the speed at the maxmark
 
 void retrieve_setting_from_eeprom();
 
+unsigned long period_buf[2];
 void IRQcounter() {
-  bool in = digitalRead(2);
+  bool in = digitalRead(SPEED_INPUT_PIN);
   if (in == LOW) {
-		digitalWrite(9, toggle);
-		toggle = !toggle;
 		return;
   }
   currentMicros = micros();
-  if (currentMicros - lastMicros < 1000) return; /* reject to short pulses */
+  // if (currentMicros - lastMicros < 1000) return; reject to short pulses 
   distanceCount++;
-  /* Save period in ring buffer so we can weed out spurious pulses  */
-  /* period[distanceCount & 3] = currentMicros - lastMicros; */
-  period[0] = currentMicros - lastMicros;
+  // Save period in shift buffer so we can weed out spurious pulses
+	period_buf[1] = period_buf[0];
+  period_buf[0] = currentMicros - lastMicros;
+
+	// reject to large jumps by waiting for two consecutive large diffs
+	if ( abs(period_buf[0] - period_buf[1]) < 900 ) { // uS
+		// reject too small changes to aviod flicker 
+		if ( abs(period - period_buf[0]) >= 6 ) {  // uS 
+			period  = period_buf[0]; 
+		}
+	}
   lastMicros = currentMicros;
 }
 
@@ -74,16 +80,15 @@ void setup() {
 	Serial.begin(9600);
 
 #ifdef ODO
-	pinMode(odo_reset_pin, INPUT_PULLUP);
+	pinMode(ODO_RESET_PIN, INPUT_PULLUP);
 #endif
-	pinMode(speed_input_pin, INPUT);
+	pinMode(IGN_SENSE_PIN, INPUT);
+	pinMode(SPEED_INPUT_PIN, INPUT);
 
-	pinMode(X12_RESET, OUTPUT);
-	digitalWrite(X12_RESET, LOW);
-	delayMicroseconds(1000);
-	digitalWrite(X12_RESET, HIGH);
+	pinMode(BAT_CUT_PIN, OUTPUT);
+	digitalWrite(BAT_CUT_PIN, HIGH); // Make NPN pull down FET gate to ground to keep bat
 
-	attachInterrupt(digitalPinToInterrupt(speed_input_pin), IRQcounter, RISING);
+	attachInterrupt(digitalPinToInterrupt(SPEED_INPUT_PIN), IRQcounter, RISING);
 
 	// SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
 #ifdef ODO    
@@ -98,17 +103,6 @@ void setup() {
 	speedo_init();
 	retrieve_setting_from_eeprom();
 	speedo(0, false);
-}
-
-unsigned long longest(unsigned long *periodp) {
-	unsigned int max = 0;
-	int i;
-	for ( i = 0; i < 4; i ++) {
-		if ( periodp[i] > max ) {
-			max = periodp[i];
-		}
-	}
-	return max;
 }
 
 // tokenize(s) split s into global array cmd 
@@ -159,8 +153,10 @@ int get_command(){
 #define RUN_MODE 0
 #define MOVETO_MODE 1
 #define SPEEDTEST_MODE 2
+#define SHUTDOWN_MODE 3
 
 void loop() {
+	int p;
 	static int mode = RUN_MODE;
 	static int modevalue = 0;
 	int speed = 0, lastSpeed = 0;
@@ -213,10 +209,21 @@ void loop() {
       if (t - startTime > 1000) {
 				speed = 0;
       } else {
-				speed = (3600000000/PULSES_PER_KM)/period[0]; // period in uS -> speed in km/h
+				speed = (3600000000/PULSES_PER_KM)/period; // period in uS -> speed in km/h
       }
-      /* Serial.print("period: "); */
-      /* Serial.println(period[0]); */
+
+			/* if( p != period ) { */
+			/* 	Serial.print("p: "); */
+			/* 	Serial.println(period); */
+			/* 	p = period; */
+			/* } */
+			if( p != speed ) {
+				Serial.print("s: ");
+				Serial.print(speed);
+				Serial.print("  p: ");
+				Serial.println(period);
+				p = speed;
+			}
   
 #ifdef ODO
       odo(distance);
@@ -228,20 +235,36 @@ void loop() {
 				Serial.println("RESET");
 				reset_distance();
       }
+			bool ign = digitalRead(IGN_SENSE_PIN);
+			if ( ign == LOW ) {
+				mode = SHUTDOWN_MODE;
+				Serial.println("SHUTDOWN_MODE");
+			}
 		} else if ( mode == MOVETO_MODE ) {
       moveto(modevalue);
 		} else if ( mode == SPEEDTEST_MODE ) {
       speedo(modevalue, false);
+		} else if ( mode == SHUTDOWN_MODE ) {
+			speedo(0,false);
+			digitalWrite(BAT_CUT_PIN, LOW); // Turn off BAT and try to die
+			delay(1000);
+			// In case BAT comes back before we die. 
+			while(digitalRead(IGN_SENSE_PIN) == LOW) {
+							delay(1000);
+			}
+			digitalWrite(BAT_CUT_PIN, HIGH); // Turn on BAT again
+			Serial.println("IGN came back - RUN_MODE");
+			mode = RUN_MODE;
 		}
 	}
 }
 
 
 bool odoResetButton() {
-#ifdef ODO
+#ifdef ODO 
 	static int prevState = HIGH;
 	bool retval = false;
-	int state = digitalRead(odo_reset_pin);
+	int state = digitalRead(ODO_RESET_PIN);
 	if(state == LOW && prevState != state) {
 		delay(100);
 		retval = true;
@@ -259,14 +282,13 @@ unsigned long get_saved_long(int pos) {
 	unsigned long value;
 	byte *bp;
 	bp = (byte*)&value;
-    
-	for( i =0; i<4; i++) {
+	for(i=0; i<4; i++) {
 		bp[i] = EEPROM.read(pos*4 + i);
 	}
 	return value;
 }
 
-
+/* Write a long (4 bytes) to pos  */
 void save_long(int pos, unsigned long value) {
 	int i;
 	byte *bp;
@@ -274,14 +296,11 @@ void save_long(int pos, unsigned long value) {
 	for( i =0; i<4; i++) {
 		byte rvalue;
 		rvalue = EEPROM.read(pos*4 + i);
+		/* Only write if it has changed - to save writes */
 		if(rvalue != bp[i]) {
 	    EEPROM.write(pos*4 + i, bp[i]);
 		}
 	}
-	Serial.print(" saving ");
-	Serial.println(value);
-	Serial.print(" to pos: ");
-	Serial.println(pos);
 }
 
 /* We will write to multiple possitions i eeprom to get more cycle life */
@@ -338,6 +357,7 @@ void save_distance(unsigned long distance) {
 }
 
 void retrieve_setting_from_eeprom() {
+	/* They are stored after ROTATE_POSITIONS */
 	zeromark = (int)(get_saved_long(ROTATE_POSITIONS));
 	maxmark = (int)(get_saved_long(ROTATE_POSITIONS+1));
 	if ( maxmark == 0 ) {
@@ -389,7 +409,6 @@ void speedo_init() {
 	motor1.setPos(ZEROPOS);
 }
 
-#define STEPS_PER_BIG_KPH_MARK 63
 // speedin in km/h 
 void speedo(int speedin, bool debug)
 {
